@@ -1,4 +1,9 @@
-use std::{convert::Infallible, str::FromStr};
+use std::{
+    convert::Infallible,
+    fmt::Display,
+    ops::{Deref, DerefMut},
+    str::FromStr,
+};
 
 use yew::AttrValue;
 
@@ -191,6 +196,50 @@ impl Value for AttrValue {
 
     fn from_value(value: &AttrValue) -> Result<Self, Self::Err> {
         Ok(value.clone())
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Wrapped<T>(pub T);
+
+impl<T> Value for Wrapped<T>
+where
+    T: FromStr + ToString + PartialEq + 'static,
+{
+    type Err = <T as FromStr>::Err;
+
+    fn to_value(&self) -> AttrValue {
+        self.to_string().into()
+    }
+
+    fn from_value(value: &AttrValue) -> Result<Self, Self::Err> {
+        value.as_str().parse().map(Self)
+    }
+}
+
+impl<T> From<T> for Wrapped<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
+impl<T: Display> Display for Wrapped<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<T> Deref for Wrapped<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for Wrapped<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
