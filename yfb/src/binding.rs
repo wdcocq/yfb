@@ -196,7 +196,7 @@ where
 
 impl<T> Binding<Vec<T>>
 where
-    T: ModelState + Default,
+    T: ModelState,
 {
     /// Maps a `Binding<Vec<T>>` to a `Binding<T>` with the corresponding `index`
     pub fn map_item(&self, index: usize) -> Binding<T> {
