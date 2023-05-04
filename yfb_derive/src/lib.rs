@@ -206,7 +206,7 @@ impl ModelReceiver {
                 let ty = &f.ty;
                 (
                     quote! {
-                        fn #ident(&self) -> <#ty as #yfb::model::ModelState>::Modifier {
+                        #vis fn #ident(&self) -> <#ty as #yfb::model::ModelState>::Modifier {
                             #yfb::modifier::Modifier::map(&self.0, #m)
                         }
                     },
