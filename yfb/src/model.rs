@@ -8,8 +8,9 @@ use std::{
 use yew::AttrValue;
 
 use crate::{
-    field::Field,
-    modifier::{FieldModifier, Modifier, OptionModifier, VecModifier},
+    field::{Field, FieldModifier},
+    hooks::UseGenerationHandle,
+    modifier::{Modifier, OptionModifier, VecModifier},
 };
 
 pub trait Model: ModelState {
@@ -32,12 +33,13 @@ pub trait ModelState: PartialEq + Sized + 'static {
     type Modifier: Modifier<Self>;
 }
 
-pub trait State<T>: Dirty
+pub trait State<T>: Dirty + std::fmt::Debug
 where
     T: ModelState,
 {
-    fn create(model: &T, dirty: bool) -> Self;
+    fn create(model: &T, dirty: bool, generation: UseGenerationHandle) -> Self;
     fn update(&mut self, model: &T);
+    fn generation(&self) -> usize;
 }
 
 pub trait Dirty {
@@ -59,7 +61,7 @@ where
     const NAME: &'static str = T::NAME;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct VecState<T>
 where
     T: ModelState,
@@ -67,21 +69,37 @@ where
     // Keeps track of the initial length, states after this length may be purged. as their initial state is not needed.
     initial_length: usize,
     valid_length: usize,
+    generation: UseGenerationHandle,
     pub(crate) current: Vec<T::State>,
+}
+
+impl<T> std::fmt::Debug for VecState<T>
+where
+    T: ModelState,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VecState")
+            .field("initial_length", &self.initial_length)
+            .field("valid_length", &self.valid_length)
+            .field("generation", &self.generation)
+            .field("current", &self.current)
+            .finish()
+    }
 }
 
 impl<T> State<Vec<T>> for VecState<T>
 where
     T: ModelState,
 {
-    fn create(model: &Vec<T>, with_initial: bool) -> Self {
+    fn create(model: &Vec<T>, with_initial: bool, generation: UseGenerationHandle) -> Self {
         Self {
             valid_length: model.len(),
             initial_length: model.len(),
             current: model
                 .iter()
-                .map(|m| State::create(m, with_initial))
+                .map(|m| State::create(m, with_initial, generation.clone()))
                 .collect(),
+            generation,
         }
     }
 
@@ -90,7 +108,7 @@ where
             model
                 .iter()
                 .skip(self.current.len())
-                .map(|m| State::create(m, false)),
+                .map(|m| State::create(m, false, self.generation.clone())),
         );
 
         if model.len() <= self.initial_length {
@@ -102,6 +120,14 @@ where
         }
 
         self.valid_length = model.len();
+    }
+
+    fn generation(&self) -> usize {
+        self.current
+            .iter()
+            .map(State::generation)
+            .max()
+            .unwrap_or_default()
     }
 }
 
@@ -139,11 +165,11 @@ impl<T> State<Option<T>> for T::State
 where
     T: ModelState + Default,
 {
-    fn create(model: &Option<T>, with_initial: bool) -> Self {
+    fn create(model: &Option<T>, with_initial: bool, generation: UseGenerationHandle) -> Self {
         model
             .as_ref()
-            .map(|m| State::create(m, with_initial))
-            .unwrap_or_else(|| State::create(&T::default(), false))
+            .map(|m| State::create(m, with_initial, generation.clone()))
+            .unwrap_or_else(|| State::create(&T::default(), false, generation))
     }
 
     fn update(&mut self, model: &Option<T>) {
@@ -151,6 +177,10 @@ where
             Some(model) => self.update(model),
             None => self.update(&T::default()),
         }
+    }
+
+    fn generation(&self) -> usize {
+        State::<T>::generation(self)
     }
 }
 
@@ -246,10 +276,12 @@ impl<T> DerefMut for Wrapped<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::use_generation;
 
     #[test]
     fn test_vec_state() {
-        let mut state = VecState::create(&vec![0, 1, 2], true);
+        let generation = use_generation();
+        let mut state = VecState::create(&vec![0, 1, 2], true, generation);
 
         assert_eq!(state.initial_length, 3);
         assert_eq!(state.current.len(), 3);

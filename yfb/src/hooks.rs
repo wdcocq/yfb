@@ -1,7 +1,9 @@
+use std::{cell::Cell, rc::Rc};
+
 use yew::prelude::*;
 
 use crate::{
-    binding::{Binding, BindingValidation},
+    binding::Binding,
     model::{Model, ModelState},
 };
 
@@ -47,16 +49,77 @@ where
     T: ModelState + 'static,
     D: PartialEq + 'static,
 {
-    let update = use_force_update();
-    let state_model = use_memo(
-        |deps| {
-            let model = init_fn(deps);
-            let state = crate::model::State::create(&model, true);
-            std::cell::RefCell::new((model, state))
-        },
-        deps,
-    );
-    Binding::new(state_model, name, BindingValidation::new(update))
+    let generation = use_generation();
+    let first = use_memo(|_| std::cell::Cell::new(true), ());
+    let state_model = {
+        let generation = generation.clone();
+        use_memo(
+            move |deps| {
+                if !first.get() {
+                    generation.increase();
+                } else {
+                    first.set(false);
+                }
+                let model = init_fn(deps);
+                let state = crate::model::State::create(&model, true, generation);
+                std::cell::RefCell::new((model, state))
+            },
+            deps,
+        )
+    };
+
+    Binding::new(state_model, name, generation.generation())
+}
+
+#[derive(Clone)]
+pub struct UseGenerationHandle {
+    generation: Rc<Cell<usize>>,
+    update: UseForceUpdateHandle,
+}
+
+impl PartialEq for UseGenerationHandle {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation.get() == other.generation.get()
+    }
+}
+
+impl std::fmt::Debug for UseGenerationHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UseGenerationHandle")
+            .field("generation", &self.generation.get())
+            .finish()
+    }
+}
+
+impl UseGenerationHandle {
+    pub fn increase(&self) -> usize {
+        let next_gen = self.generation.get().wrapping_add(1);
+        self.generation.set(next_gen);
+        self.update.force_update();
+        next_gen
+    }
+
+    pub fn generation(&self) -> usize {
+        self.generation.get()
+    }
+}
+
+#[cfg_attr(not(test), hook)]
+pub fn use_generation() -> UseGenerationHandle {
+    #[cfg(not(test))]
+    {
+        UseGenerationHandle {
+            generation: use_memo(|_| Cell::new(0), ()),
+            update: use_force_update(),
+        }
+    }
+    #[cfg(test)]
+    {
+        UseGenerationHandle {
+            generation: Rc::new(Cell::new(0)),
+            update: UseForceUpdateHandle,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -65,7 +128,39 @@ pub struct UseForceUpdateHandle;
 
 #[cfg(test)]
 impl UseForceUpdateHandle {
-    pub fn force_update(&self) {}
+    fn force_update(&self) {}
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseStateHandle<T>(pub std::rc::Rc<std::cell::RefCell<T>>)
+where
+    T: Copy;
+
+#[cfg(test)]
+impl<T> UseStateHandle<T>
+where
+    T: Copy,
+{
+    pub fn new(value: T) -> Self {
+        Self(std::cell::RefCell::new(value).into())
+    }
+
+    pub fn set(&self, value: T) {
+        *self.0.borrow_mut() = value;
+    }
+}
+
+#[cfg(test)]
+impl<T> std::ops::Deref for UseStateHandle<T>
+where
+    T: Copy,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(*self.0).as_ptr() }
+    }
 }
 
 #[cfg(test)]
@@ -79,10 +174,12 @@ where
     D: PartialEq + 'static,
 {
     let model = init_fn(&deps);
-    let state = crate::model::State::create(&model, true);
+    let generation = use_generation();
+    let state = crate::model::State::create(&model, true, generation);
+
     Binding::new(
         std::rc::Rc::new(std::cell::RefCell::new((model, state))),
         name.into(),
-        BindingValidation::new(UseForceUpdateHandle),
+        0,
     )
 }

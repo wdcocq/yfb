@@ -8,6 +8,7 @@ use yew::{
 };
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub async fn render<T>() -> String
 where
     T: BaseComponent,
@@ -17,6 +18,7 @@ where
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub async fn render_with_props<T>(props: T::Properties) -> String
 where
     T: BaseComponent,
@@ -31,9 +33,19 @@ where
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub fn get_output() -> String {
     gloo::utils::document()
         .get_element_by_id("output")
+        .unwrap()
+        .inner_html()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+pub fn get_result() -> String {
+    gloo::utils::document()
+        .get_element_by_id("result")
         .unwrap()
         .inner_html()
 }
@@ -46,6 +58,17 @@ pub fn get_first_element_of<T: wasm_bindgen::JsCast>() -> T {
         .get_element_by_id("output")
         .unwrap()
         .first_element_child()
+        .unwrap()
+        .dyn_into::<T>()
+        .unwrap()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+pub fn get_element_by_id<T: wasm_bindgen::JsCast>(id: &'static str) -> T {
+    use wasm_bindgen::JsCast;
+    gloo::utils::document()
+        .get_element_by_id(id)
         .unwrap()
         .dyn_into::<T>()
         .unwrap()
@@ -66,6 +89,7 @@ pub fn get_first_element_name<T: wasm_bindgen::JsCast>(name: &'static str) -> T 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub async fn render<T>() -> String
 where
     T: BaseComponent,
@@ -75,6 +99,7 @@ where
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub async fn render_with_props<T>(props: T::Properties) -> String
 where
     T: BaseComponent,
@@ -87,6 +112,7 @@ where
 }
 
 #[function_component(Test)]
+#[allow(dead_code)]
 pub fn test(ChildrenProps { children }: &ChildrenProps) -> Html {
     html! {
         <Suspense fallback={html!{}}>
@@ -96,6 +122,7 @@ pub fn test(ChildrenProps { children }: &ChildrenProps) -> Html {
 }
 
 #[macro_export]
+#[allow(dead_code)]
 macro_rules! create_test_comp {
     ($t:ty) => {
         #[function_component(Test)]
@@ -110,6 +137,7 @@ macro_rules! create_test_comp {
 }
 
 #[hook]
+#[allow(dead_code)]
 pub fn use_once<F>(f: F) -> SuspensionResult<()>
 where
     F: FnOnce() + 'static,

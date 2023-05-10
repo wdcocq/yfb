@@ -88,19 +88,21 @@ impl ModelReceiver {
         let model_ident = &self.ident;
         let state_ident = format_ident!("{}State", model_ident);
 
-        let (state_fields, field_idents) = fields
+        let state_fields = fields
             .iter()
             .map(|f| {
                 let ident = f.ident.as_ref().unwrap();
                 let ty = &f.ty;
                 let vis = &f.vis;
-                (
-                    quote! {
-                        #vis #ident: <#ty as #yfb::model::ModelState>::State
-                    },
-                    ident,
-                )
+                quote! {
+                    #vis #ident: <#ty as #yfb::model::ModelState>::State
+                }
             })
+            .collect::<Vec<_>>();
+
+        let (field_idents, field_types) = fields
+            .iter()
+            .map(|f| (f.ident.as_ref().unwrap(), &f.ty))
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
         (
@@ -111,9 +113,11 @@ impl ModelReceiver {
                 }
 
                 impl #yfb::model::State<#model_ident> for #state_ident {
-                    fn create(model: &#model_ident, with_initial: ::std::primitive::bool) -> Self {
+                    fn create(model: &#model_ident,
+                              with_initial: ::std::primitive::bool,
+                              generation: #yfb::hooks::UseGenerationHandle) -> Self {
                         Self {
-                            #(#field_idents: #yfb::model::State::create(&model.#field_idents, with_initial)),*
+                            #(#field_idents: #yfb::model::State::create(&model.#field_idents, with_initial, generation.clone())),*
                         }
                     }
 
@@ -121,6 +125,12 @@ impl ModelReceiver {
                         #(
                             self.#field_idents.update(&model.#field_idents);
                         )*
+                    }
+
+                    fn generation(&self) -> usize {
+                        [#(
+                            #yfb::model::State::<#field_types>::generation(&self.#field_idents)
+                        ),*].into_iter().max().unwrap_or_default()
                     }
                 }
 
@@ -234,18 +244,12 @@ impl ModelReceiver {
                 #vis struct #modifier_ident(#yfb::modifier::BaseModifier<#model_ident>);
 
                 impl #yfb::modifier::Modifier<#model_ident> for #modifier_ident {
-                    fn create(
-                        provider: #yfb::state_model::StateModelRc<#model_ident>,
-                        validation: ::std::rc::Rc<#yfb::binding::BindingValidation>) -> Self {
-                        Self(#yfb::modifier::Modifier::create(provider, validation))
+                    fn create(state_model: #yfb::state_model::StateModelRc<#model_ident>) -> Self {
+                        Self(#yfb::modifier::Modifier::create(state_model))
                     }
 
                     fn state_model(&self) -> &#yfb::state_model::StateModelRc<#model_ident> {
                         #yfb::modifier::Modifier::state_model(&self.0)
-                    }
-
-                    fn validation(&self) -> &::std::rc::Rc<#yfb::binding::BindingValidation> {
-                        #yfb::modifier::Modifier::validation(&self.0)
                     }
                 }
 
@@ -255,10 +259,6 @@ impl ModelReceiver {
 
                 impl Drop for #modifier_ident  {
                     fn drop(&mut self) {
-                        if #yfb::modifier::Modifier::validation(self).valid() {
-                            return;
-                        }
-
                         if !#yfb::modifier::Modifier::dirty(self) {
                             return;
                         }

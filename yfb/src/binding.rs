@@ -1,57 +1,19 @@
 use std::{
-    cell::{Cell, Ref},
+    cell::Ref,
     fmt::{self, Debug, Formatter},
+    ops::Deref,
     rc::Rc,
 };
 
-#[cfg(not(test))]
-use yew::UseForceUpdateHandle;
 use yew::{html::ImplicitClone, AttrValue};
 
-#[cfg(test)]
-use crate::hooks::UseForceUpdateHandle;
 use crate::{
-    model::{Model, ModelState},
+    model::{Model, ModelState, State},
     modifier::Modifier,
     state_model::{
         MappedOptionStateModel, MappedStateModel, MappedVecStateModel, Mapping, StateModelRc,
     },
 };
-
-#[derive(Debug)]
-pub enum BindingValidation {
-    Root(UseForceUpdateHandle, Cell<bool>),
-    Child(Rc<Self>, Cell<bool>),
-}
-
-impl BindingValidation {
-    pub(crate) fn new(update: UseForceUpdateHandle) -> Self {
-        Self::Root(update, Cell::new(true))
-    }
-
-    fn from_parent(parent: Rc<BindingValidation>) -> Self {
-        Self::Child(parent, Cell::new(true))
-    }
-
-    pub fn invalidate(&self) {
-        match self {
-            Self::Root(update, valid) => {
-                valid.set(false);
-                update.force_update();
-            }
-            Self::Child(parent, valid) => {
-                valid.set(false);
-                parent.invalidate();
-            }
-        }
-    }
-
-    pub fn valid(&self) -> bool {
-        match self {
-            BindingValidation::Root(_, valid) | BindingValidation::Child(_, valid) => valid.get(),
-        }
-    }
-}
 
 /// Use to bind between a [`Model`] or [`Value`](crate::model::Value) and a component
 /// Use one of the [`use_binding()`](fn@crate::hooks::use_binding) or [`use_named_binding()`](fn@crate::hooks::use_named_binding) hooks to create a binding.
@@ -61,7 +23,7 @@ where
 {
     state_model: StateModelRc<T>,
     name: AttrValue,
-    generation: Rc<BindingValidation>,
+    valid_generation: usize,
 }
 
 impl<T: Debug> Debug for Binding<T>
@@ -69,9 +31,11 @@ where
     T: ModelState,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Binding")
-            .field(&self.name)
-            .field(&self.generation)
+        f.debug_struct("Binding")
+            .field("name", &self.name.as_str())
+            .field("valid_generation", &self.valid_generation)
+            .field("model", &*self.model())
+            .field("state", &*self.state())
             .finish()
     }
 }
@@ -83,12 +47,12 @@ where
     pub(crate) fn new(
         state_model: StateModelRc<T>,
         name: impl Into<AttrValue>,
-        validation: BindingValidation,
+        valid_generation: usize,
     ) -> Self {
         Self {
             state_model,
             name: name.into(),
-            generation: Rc::new(validation),
+            valid_generation,
         }
     }
 
@@ -104,7 +68,7 @@ where
 
     /// Create a modifier to modify the binding's model and state
     pub fn modifier(&self) -> T::Modifier {
-        Modifier::create(self.state_model.clone(), self.generation.clone())
+        Modifier::create(self.state_model.clone())
     }
 
     /// The name of the binding, each subsequent binding will append to the root name.
@@ -156,7 +120,7 @@ where
         Self {
             state_model: self.state_model.clone(),
             name: name.into(),
-            generation: self.generation.clone(),
+            valid_generation: self.valid_generation,
         }
     }
 }
@@ -172,10 +136,11 @@ where
     where
         M: Mapping<From = T>,
     {
+        let name: AttrValue = format!("{}.{}", self.name, M::NAME).into();
         Binding::new(
             Rc::new(MappedStateModel::new(self.state_model.clone(), mapping)),
-            format!("{}.{}", self.name, M::NAME),
-            BindingValidation::from_parent(self.generation.clone()),
+            name,
+            self.valid_generation,
         )
     }
 }
@@ -189,7 +154,7 @@ where
         Binding::new(
             Rc::new(MappedOptionStateModel::new(self.state_model.clone())),
             self.name.clone(),
-            BindingValidation::from_parent(self.generation.clone()),
+            self.valid_generation,
         )
     }
 }
@@ -200,10 +165,11 @@ where
 {
     /// Maps a `Binding<Vec<T>>` to a `Binding<T>` with the corresponding `index`
     pub fn map_item(&self, index: usize) -> Binding<T> {
+        let name: AttrValue = format!("{}[{}]", self.name, index).into();
         Binding::new(
             Rc::new(MappedVecStateModel::new(self.state_model.clone(), index)),
-            format!("{}[{}]", self.name, index),
-            BindingValidation::from_parent(self.generation.clone()),
+            name,
+            self.valid_generation,
         )
     }
 }
@@ -213,7 +179,14 @@ where
     T: ModelState,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.generation.valid() && other.generation.valid() && self.name == other.name
+        let max_generation = self
+            .state()
+            .deref()
+            .generation()
+            .max(other.state().deref().generation());
+
+        max_generation <= self.valid_generation.min(other.valid_generation)
+            && self.name == other.name
     }
 }
 
@@ -225,7 +198,7 @@ where
         Self {
             state_model: self.state_model.clone(),
             name: self.name.clone(),
-            generation: self.generation.clone(),
+            valid_generation: self.valid_generation,
         }
     }
 }
@@ -357,6 +330,19 @@ mod tests {
     }
 
     #[test]
+    fn test_binding_value_option() {
+        // fn test<T: Value>(binding: Binding<T>) {
+        // }
+        let binding = use_named_binding("answer", || Some("test".to_string()));
+        let binding_option = binding.map_option();
+        assert_eq!(binding_option.state().value(), "test");
+        binding.modifier().replace_model(None);
+        assert_eq!(*binding.model(), None);
+        assert_eq!(binding_option.state().value(), "");
+        assert_ne!(binding_option, binding_option);
+    }
+
+    #[test]
     fn test_owned_option() {
         #[derive(Debug, Default, PartialEq, Model, Validate)]
         #[yfb(path = "crate")]
@@ -386,54 +372,7 @@ mod tests {
         let binding = use_named_binding("answer", || 42);
         binding.modifier().set("43");
         assert_eq!(*binding.model(), 43);
-        assert!(!binding.generation.valid());
-    }
-
-    #[test]
-    fn test_binding_eq() {
-        #[derive(Debug, Default, PartialEq, Model, Validate)]
-        #[yfb(path = "crate")]
-        struct Model {
-            a: u32,
-            b: u32,
-        }
-
-        let model = Model::default();
-        let state = State::create(&model, true);
-        let validation = BindingValidation::new(UseForceUpdateHandle);
-        let model_state = std::rc::Rc::new(std::cell::RefCell::new((model, state)));
-        let binding = Binding::new(model_state.clone(), "model", validation);
-
-        let a_binding = binding.a_binding();
-        let b_binding = binding.b_binding();
-
-        assert_eq!(a_binding, a_binding);
-        assert_eq!(b_binding, b_binding);
-        assert_ne!(a_binding, b_binding);
-
-        a_binding.modifier().set("42");
-
-        let validation = BindingValidation::new(UseForceUpdateHandle);
-        let new_binding = Binding::new(model_state.clone(), "model", validation);
-        let new_a_binding = new_binding.a_binding();
-        let new_b_binding = new_binding.b_binding();
-
-        assert_ne!(binding, new_binding);
-        assert_ne!(a_binding, new_a_binding);
-        assert_eq!(b_binding, new_b_binding);
-        assert_ne!(new_a_binding, new_b_binding);
-
-        new_b_binding.modifier().set("43");
-
-        let validation = BindingValidation::new(UseForceUpdateHandle);
-        let new_new_binding = Binding::new(model_state, "model", validation);
-        let a_binding = new_new_binding.a_binding();
-        let b_binding = new_new_binding.b_binding();
-
-        assert_ne!(new_binding, new_new_binding);
-        assert_eq!(a_binding, new_a_binding);
-        assert_ne!(b_binding, new_b_binding);
-        assert_ne!(a_binding, b_binding);
+        assert_ne!(binding, binding);
     }
 
     #[test]
