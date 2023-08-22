@@ -105,7 +105,7 @@ pub fn select<T: Value>(
             { for children.iter().map(move |option| {
                 match option {
                     Options::Controlled(mut option) => {
-                        let mut props = Rc::make_mut(&mut option.props);
+                        let props = Rc::make_mut(&mut option.props);
                         props.selected = props.value == selected;
                         option.into()
                     },

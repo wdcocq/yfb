@@ -38,7 +38,7 @@ where
     T: ModelState,
 {
     fn create(model: &T, dirty: bool, generation: UseGenerationHandle) -> Self;
-    fn update(&mut self, model: &T);
+    fn update(&mut self, model: &T, replace: bool);
     fn generation(&self) -> usize;
 }
 
@@ -103,7 +103,10 @@ where
         }
     }
 
-    fn update(&mut self, model: &Vec<T>) {
+    fn update(&mut self, model: &Vec<T>, replace: bool) {
+        if self.valid_length != model.len() {
+            self.generation.increase();
+        }
         self.current.extend(
             model
                 .iter()
@@ -116,7 +119,7 @@ where
         }
 
         for (s, m) in self.current.iter_mut().zip(model) {
-            s.update(m);
+            s.update(m, replace);
         }
 
         self.valid_length = model.len();
@@ -172,10 +175,10 @@ where
             .unwrap_or_else(|| State::create(&T::default(), false, generation))
     }
 
-    fn update(&mut self, model: &Option<T>) {
+    fn update(&mut self, model: &Option<T>, replace: bool) {
         match model {
-            Some(model) => self.update(model),
-            None => self.update(&T::default()),
+            Some(model) => self.update(model, replace),
+            None => self.update(&T::default(), replace),
         }
     }
 
@@ -259,6 +262,17 @@ impl<T: Display> Display for Wrapped<T> {
     }
 }
 
+impl<T> FromStr for Wrapped<T>
+where
+    T: FromStr,
+{
+    type Err = <T as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(T::from_str(s)?))
+    }
+}
+
 impl<T> Deref for Wrapped<T> {
     type Target = T;
 
@@ -290,14 +304,14 @@ mod tests {
         assert!(!state.current[1].dirty());
         assert!(!state.current[2].dirty());
 
-        state.update(&vec![1, 1]);
+        state.update(&vec![1, 1], false);
         assert_eq!(state.initial_length, 3);
         assert_eq!(state.current.len(), 3);
         assert!(state.dirty());
         assert!(state.current[0].dirty());
         assert!(!state.current[1].dirty());
 
-        state.update(&vec![2, 3, 4, 5]);
+        state.update(&vec![2, 3, 4, 5], false);
         assert_eq!(state.initial_length, 3);
         assert_eq!(state.current.len(), 4);
         assert!(state.dirty());
@@ -306,7 +320,7 @@ mod tests {
         assert!(state.current[2].dirty());
         assert!(state.current[3].dirty());
 
-        state.update(&vec![0, 1, 2]);
+        state.update(&vec![0, 1, 2], false);
         assert_eq!(state.initial_length, 3);
         assert_eq!(state.current.len(), 3);
         assert!(!state.dirty());

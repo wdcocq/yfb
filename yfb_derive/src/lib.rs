@@ -121,9 +121,9 @@ impl ModelReceiver {
                         }
                     }
 
-                    fn update(&mut self, model: &#model_ident) {
+                    fn update(&mut self, model: &#model_ident, replace: bool) {
                         #(
-                            self.#field_idents.update(&model.#field_idents);
+                            self.#field_idents.update(&model.#field_idents, replace);
                         )*
                     }
 
@@ -223,9 +223,9 @@ impl ModelReceiver {
                     quote! {
                         #ident_name => {
                             let modifier = self.#ident();
-                            if modifier.dirty() {
-                                if let Some(error) = errors.first() {
-                                    modifier.set_message(error.message.clone().map(|m| m.into()));
+                            if #yfb::modifier::Modifier::dirty(&modifier) {
+                                if let Some(error) = <[::validator::ValidationError]>::first(errors) {
+                                    #yfb::modifier::Modifier::set_message(&modifier, error.message.clone().map(|m| m.into()));
                                 }
                             }
                         },
@@ -269,7 +269,7 @@ impl ModelReceiver {
                         };
 
                         #(
-                            self.#field_idents().set_message(None);
+                            #yfb::modifier::Modifier::set_message(&self.#field_idents(), None);
                         )*
 
                         let Err(errors) = validation else {

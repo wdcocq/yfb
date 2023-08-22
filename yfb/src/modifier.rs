@@ -3,7 +3,7 @@ use std::{cell::Ref, rc::Rc};
 use yew::AttrValue;
 
 use crate::{
-    model::{Dirty, ModelState, State},
+    model::{Dirty, ModelState, State, Value},
     state_model::{MappedStateModel, MappedVecStateModel, Mapping, StateModelRc},
 };
 
@@ -41,7 +41,7 @@ where
     fn replace_model(&self, model: T) {
         let (mut model_mut, mut state) = self.state_model().as_mut();
         *model_mut = model;
-        State::<T>::update(&mut *state, &*model_mut);
+        State::<T>::update(&mut *state, &*model_mut, true);
     }
 }
 
@@ -69,15 +69,24 @@ where
     pub fn take(&self) -> Option<T> {
         let (mut model, mut state) = self.state_model().as_mut();
         let tmp = model.take();
-        State::<Option<T>>::update(&mut *state, &*model);
+        State::<Option<T>>::update(&mut *state, &*model, false);
         tmp
     }
 
     pub fn replace(&self, value: T) -> Option<T> {
         let (mut model, mut state) = self.state_model().as_mut();
         let tmp = (*model).replace(value);
-        State::<Option<T>>::update(&mut *state, &*model);
+        State::<Option<T>>::update(&mut *state, &*model, false);
         tmp
+    }
+}
+impl<T> OptionModifier<T>
+where
+    T: Value + Default,
+{
+    pub fn set_initial(&self, value: Option<T>) {
+        let (_, mut state) = self.state_model().as_mut();
+        state.set_initial(value.map(|v| v.to_value()));
     }
 }
 
@@ -88,13 +97,13 @@ where
     pub fn push(&self, value: T) {
         let (mut model, mut state) = self.state_model().as_mut();
         model.push(value);
-        (*state).update(&*model);
+        (*state).update(&*model, false);
     }
 
     pub fn remove(&self, index: usize) {
         let (mut model, mut state) = self.state_model().as_mut();
         model.remove(index);
-        (*state).update(&*model);
+        (*state).update(&*model, false);
     }
 
     pub fn item_modifier(&self, index: usize) -> T::Modifier {

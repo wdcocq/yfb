@@ -44,15 +44,20 @@ impl Field {
         &self.value
     }
 
-    pub(crate) fn set_value(&mut self, value: AttrValue) {
+    pub(crate) fn set_value(&mut self, value: AttrValue, replace: bool) {
         if value != self.value {
-            match self.initial.as_ref() {
-                // Clone back the initial value so the new value can be dropped when not needed further
-                Some(initial) if *initial == value => {
-                    self.value = initial.clone();
-                    self.message = None;
+            if replace {
+                self.initial = Some(value.clone());
+                self.value = value;
+            } else {
+                match self.initial.as_ref() {
+                    // Clone back the initial value so the new value can be dropped when not needed further
+                    Some(initial) if *initial == value => {
+                        self.value = initial.clone();
+                        self.message = None;
+                    }
+                    _ => self.value = value,
                 }
-                _ => self.value = value,
             }
             self.generation = self.generation_handle.increase();
         }
@@ -81,6 +86,11 @@ impl Field {
             self.generation = self.generation_handle.increase();
         }
     }
+
+    pub(crate) fn set_initial(&mut self, initial: Option<AttrValue>) {
+        self.initial = initial;
+        self.generation = self.generation_handle.increase();
+    }
 }
 
 impl<T> State<T> for Field
@@ -100,8 +110,8 @@ where
         }
     }
 
-    fn update(&mut self, model: &T) {
-        self.set_value(model.to_value());
+    fn update(&mut self, model: &T, replace: bool) {
+        self.set_value(model.to_value(), replace);
     }
 
     fn generation(&self) -> usize {
@@ -157,7 +167,7 @@ where
         match T::from_value(&value) {
             Ok(t) => {
                 *model = t;
-                state.set_value(value);
+                state.set_value(value, false);
             }
             Err(_) => {
                 state.set_error(Some(
@@ -174,7 +184,12 @@ where
 
     pub fn set_value(&self, value: T) {
         let (mut model, mut state) = self.state_model().as_mut();
-        state.set_value(value.to_value());
+        state.set_value(value.to_value(), false);
         *model = value;
+    }
+
+    pub fn set_initial(&self, value: Option<T>) {
+        let (_, mut state) = self.state_model().as_mut();
+        state.set_initial(value.map(|v| v.to_value()));
     }
 }

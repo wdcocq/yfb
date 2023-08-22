@@ -232,9 +232,7 @@ mod tests {
             name_vec: Vec<String>,
         }
 
-        let binding = use_binding(||
-        // let binding = use_binding(|| 
-        Parent {
+        let binding = use_binding(|| Parent {
             child: Default::default(),
             child_opt: Some(Default::default()),
             child_none: None,
